@@ -1,6 +1,8 @@
 import React, { useState, useCallback } from 'react';
 
+
 // --- Helper & Component Icon Definitions ---
+
 
 const BrainCircuitIcon = (props) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
@@ -16,6 +18,7 @@ const BrainCircuitIcon = (props) => (
   </svg>
 );
 
+
 const ImageIcon = (props) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
     <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
@@ -23,6 +26,7 @@ const ImageIcon = (props) => (
     <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
   </svg>
 );
+
 
 const SparklesIcon = (props) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
@@ -34,19 +38,37 @@ const SparklesIcon = (props) => (
   </svg>
 );
 
+
+// --- NEW --- Icon for clearing the sketch
+const XCircleIcon = (props) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="m15 9-6 6" />
+    <path d="m9 9 6 6" />
+  </svg>
+);
+
+
 // --- Main Application Component ---
+
 
 export default function App() {
   const [productConcept, setProductConcept] = useState('');
   const [targetAudience, setTargetAudience] = useState('');
+  // --- NEW --- State for uploaded sketch
+  const [sketch, setSketch] = useState(null); // Stores { mimeType, data }
+  const [sketchPreview, setSketchPreview] = useState(null); // Stores URL for <img>
   const [storyboard, setStoryboard] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // API Configuration - Key is left empty and handled by the environment
+
+  // API Configuration
   const API_KEY = import.meta.env.VITE_GEMINI_API_KEY; 
-  const TEXT_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`;
-  const IMAGE_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${API_KEY}`;
+  // This model is for text generation, but can also take an image input
+  const TEXT_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`;
+  // --- MODIFIED --- This model is for image generation AND can take an image input
+  const IMAGE_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${API_KEY}`;
   
   // --- API Call Functions with Exponential Backoff ---
   
@@ -64,97 +86,206 @@ export default function App() {
     throw new Error(`API call failed after ${maxRetries} attempts.`);
   };
 
-  const generateStoryboardScript = async (concept, audience) => {
-    const systemPrompt = `You are an expert creative director specializing in short, punchy product concept videos for social media. A user will provide a product concept and a target audience.
-    Your task is to generate a compelling 3-scene storyboard script.
-    - Each scene must have a visual description that is vivid, descriptive, and under 30 words, perfect for an AI image generator.
-    - Each scene must have a short, engaging voiceover script (under 25 words).
-    - Each scene can optionally have a brief, impactful on-screen text (under 5 words).
-    Respond ONLY with a valid JSON array where each object represents a scene and has these keys: "sceneNumber", "visualDescription", "voiceover", "onScreenText".`;
-    
-    const userPrompt = `Product Concept: "${concept}". Target Audience: "${audience}".`;
-    
-    const payload = {
-      contents: [{ parts: [{ text: userPrompt }] }],
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "ARRAY",
-          items: {
-            type: "OBJECT",
-            properties: {
-              sceneNumber: { type: "INTEGER" },
-              visualDescription: { type: "STRING" },
-              voiceover: { type: "STRING" },
-              onScreenText: { type: "STRING" },
-            },
-            required: ["sceneNumber", "visualDescription", "voiceover"],
+
+  // --- MODIFIED --- Now accepts the sketch to send with the prompt
+  // --- MODIFIED --- Now accepts the sketch to send with the prompt
+const generateStoryboardScript = async (concept, audience, sketchData) => {
+  const systemPrompt = `You are an expert creative director and storyboard artist. 
+Your task is to create compelling product video storyboards.
+
+Generate a storyboard with 4-6 scenes for a product video. Each scene should include:
+- sceneNumber: Sequential number for the scene
+- visualDescription: Detailed visual description for image generation (2-3 sentences, cinematic and specific)
+- voiceover: Engaging narration for the scene (1-2 sentences)
+- onScreenText: Optional bold text to display (keep it short and impactful, or omit if not needed)
+
+Make the storyboard visually dynamic, emotionally engaging, and aligned with the target audience.
+Focus on telling a clear story that showcases the product's benefits and value proposition.
+
+Respond ONLY with a valid JSON array of scene objects.`;
+  
+  // --- MODIFIED --- Build a dynamic parts array
+  const userPromptParts = [
+    { text: `Product Concept: "${concept}". Target Audience: "${audience}".` }
+  ];
+
+  if (sketchData) {
+    userPromptParts.push({ text: "Please use this user-provided sketch as strong visual inspiration for the scenes:" });
+    userPromptParts.push({
+      inlineData: {
+        mimeType: sketchData.mimeType,
+        data: sketchData.data
+      }
+    });
+  }
+
+  const payload = {
+    contents: [{ parts: userPromptParts }],
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            sceneNumber: { type: "INTEGER" },
+            visualDescription: { type: "STRING" },
+            voiceover: { type: "STRING" },
+            onScreenText: { type: "STRING" },
           },
+          required: ["sceneNumber", "visualDescription", "voiceover"],
         },
       },
-    };
+    },
+  };
 
-    const apiCall = async () => {
-        const response = await fetch(TEXT_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        });
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        return response.json();
-    };
+  const apiCall = async () => {
+    const response = await fetch(TEXT_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`HTTP error! status: ${response.status}, message: ${JSON.stringify(errorData)}`);
+    }
+    return response.json();
+  };
+  
+  const result = await exponentialBackoff(apiCall);
+  const rawJson = result.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!rawJson) throw new Error("Failed to get a valid script from the AI.");
+  return JSON.parse(rawJson);
+};
+
+
+
+  // --- MODIFIED --- Completely new function for multimodal image generation
+  // --- FIXED --- Image generation without invalid generationConfig
+// --- FIXED --- Image generation with renamed variable
+const generateImage = async (prompt, sketchData) => {
+  
+  const parts = [
+    { text: `Create a cinematic, professional product video still, high resolution, dynamic lighting, based on this description: "${prompt}"` }
+  ];
+
+  if (sketchData) {
+    parts.push({ text: "Use this sketch as a strong visual reference for composition and style:" });
+    parts.push({
+      inlineData: {
+        mimeType: sketchData.mimeType,
+        data: sketchData.data
+      }
+    });
+  }
+  
+  const payload = { 
+    contents: [{ parts: parts }]
+  };
+
+  const apiCall = async () => {
+    const response = await fetch(IMAGE_API_URL, { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
     
-    const result = await exponentialBackoff(apiCall);
-    const rawJson = result.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawJson) throw new Error("Failed to get a valid script from the AI.");
-    return JSON.parse(rawJson);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('API Error Response:', errorText);
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    return response.json();
   };
 
-  const generateImage = async (prompt) => {
-    const fullPrompt = `Cinematic, professional product video still, high resolution, dynamic lighting, ${prompt}`;
-    const payload = { 
-        instances: [{ prompt: fullPrompt }],
-        parameters: { sampleCount: 1 } 
-    };
+  const result = await exponentialBackoff(apiCall);
+  
+  // FIXED: Renamed to responseParts to avoid redeclaration
+  const responseParts = result.candidates?.[0]?.content?.parts;
+  if (!responseParts) throw new Error("Failed to generate an image - no parts in response.");
+  
+  // Find the first part with inlineData (the image)
+  const imagePart = responseParts.find(part => part.inlineData);
+  if (!imagePart?.inlineData?.data) {
+    throw new Error("Failed to generate an image - no image data in response.");
+  }
+  
+  // Return the base64 data URL
+  const mimeType = imagePart.inlineData.mimeType || 'image/png';
+  return `data:${mimeType};base64,${imagePart.inlineData.data}`;
+};
 
-    const apiCall = async () => {
-      const response = await fetch(IMAGE_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+
+
+
+  // --- NEW --- Handler for file upload
+  const handleSketchUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) {
+      setSketch(null);
+      setSketchPreview(null);
+      return;
+    }
+
+
+    // 1. Create a preview URL for the <img> tag
+    setSketchPreview(URL.createObjectURL(file));
+
+
+    // 2. Convert the file to Base64 for the API
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onloadend = () => {
+      // The result includes a prefix like "data:image/png;base64,"
+      // We need to split it and save the data and the mimeType
+      const base64String = reader.result;
+      const mimeType = base64String.substring(base64String.indexOf(":") + 1, base64String.indexOf(";"));
+      const data = base64String.split(',')[1];
+      
+      setSketch({
+        mimeType: mimeType,
+        data: data
       });
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return response.json();
     };
-
-    const result = await exponentialBackoff(apiCall);
-    const base64Data = result.predictions?.[0]?.bytesBase64Encoded;
-    if (!base64Data) throw new Error("Failed to generate an image.");
-    return `data:image/png;base64,${base64Data}`;
   };
+
+
+  // --- NEW --- Handler to clear the sketch
+  const clearSketch = () => {
+    setSketch(null);
+    setSketchPreview(null);
+    // Also clear the file input field
+    document.getElementById('sketchUpload').value = null;
+  };
+
 
   // --- Main Handler ---
   
   const handleGenerateStoryboard = useCallback(async () => {
+    // --- MODIFIED --- Added sketch to validation
     if (!productConcept || !targetAudience) {
-      setError("Please fill in both product concept and target audience.");
+      setError("Please fill in all text fields.");
       return;
     }
     setIsLoading(true);
     setError(null);
     setStoryboard([]);
 
+
     try {
-      const script = await generateStoryboardScript(productConcept, targetAudience);
+      // --- MODIFIED --- Pass sketch to script generator
+      const script = await generateStoryboardScript(productConcept, targetAudience, sketch);
       
-      // Initialize storyboard with text and loading placeholders for images
       const initialStoryboard = script.map(scene => ({ ...scene, imageUrl: null, imageIsLoading: true }));
       setStoryboard(initialStoryboard);
 
-      // Generate images sequentially to show progress
+
+      // Generate images sequentially
       for (let i = 0; i < script.length; i++) {
-        const imageUrl = await generateImage(script[i].visualDescription);
+        // --- MODIFIED --- Pass sketch to image generator
+        const imageUrl = await generateImage(script[i].visualDescription, sketch);
         setStoryboard(prev => prev.map((scene, index) => 
           index === i ? { ...scene, imageUrl, imageIsLoading: false } : scene
         ));
@@ -165,9 +296,11 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [productConcept, targetAudience]);
+    // --- MODIFIED --- Add sketch to dependency array
+  }, [productConcept, targetAudience, sketch]);
   
   // --- Individual Scene Regeneration ---
+
 
   const regenerateImage = useCallback(async (sceneIndex) => {
     const scene = storyboard[sceneIndex];
@@ -175,15 +308,19 @@ export default function App() {
     
     setStoryboard(prev => prev.map((s, i) => i === sceneIndex ? { ...s, imageIsLoading: true, imageUrl: null } : s));
 
+
     try {
-        const imageUrl = await generateImage(scene.visualDescription);
-        setStoryboard(prev => prev.map((s, i) => i === sceneIndex ? { ...s, imageUrl, imageIsLoading: false } : s));
+      // --- MODIFIED --- Pass sketch to image generator
+      const imageUrl = await generateImage(scene.visualDescription, sketch);
+      setStoryboard(prev => prev.map((s, i) => i === sceneIndex ? { ...s, imageUrl, imageIsLoading: false } : s));
     } catch (err) {
-        console.error(err);
-        setStoryboard(prev => prev.map((s, i) => i === sceneIndex ? { ...s, imageIsLoading: false } : s)); // Stop loading on error
-        setError(`Failed to regenerate image for scene ${scene.sceneNumber}.`);
+      console.error(err);
+      setStoryboard(prev => prev.map((s, i) => i === sceneIndex ? { ...s, imageIsLoading: false } : s));
+      setError(`Failed to regenerate image for scene ${scene.sceneNumber}.`);
     }
-  }, [storyboard]);
+    // --- MODIFIED --- Add sketch to dependency array
+  }, [storyboard, sketch]);
+
 
   return (
     <div className="bg-slate-900 min-h-screen text-slate-100 font-sans p-4 sm:p-6 md:p-8">
@@ -199,6 +336,7 @@ export default function App() {
             Transform your product ideas into visual stories, instantly.
           </p>
         </header>
+
 
         <main>
           <div className="bg-slate-800/50 p-6 rounded-2xl shadow-lg border border-slate-700 mb-8">
@@ -226,6 +364,41 @@ export default function App() {
                 />
               </div>
             </div>
+
+
+            {/* --- NEW --- Sketch Upload Section */}
+            <div className="mb-6">
+              <label htmlFor="sketchUpload" className="block text-sm font-medium text-slate-300 mb-2">
+                (Optional) Upload Sketch
+              </label>
+              <input
+                type="file"
+                id="sketchUpload"
+                accept="image/png, image/jpeg"
+                onChange={handleSketchUpload}
+                className="w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4
+                           file:rounded-lg file:border-0 file:text-sm file:font-semibold
+                           file:bg-cyan-600 file:text-white hover:file:bg-cyan-500
+                           file:transition-colors file:cursor-pointer"
+              />
+            </div>
+            
+            {/* --- NEW --- Sketch Preview Section */}
+            {sketchPreview && (
+              <div className="mb-6 relative w-48 mx-auto border-2 border-dashed border-slate-600 rounded-lg p-2">
+                <img src={sketchPreview} alt="Sketch preview" className="w-full rounded" />
+                <button
+                  onClick={clearSketch}
+                  className="absolute -top-2 -right-2 bg-slate-700 text-white rounded-full p-1
+                             hover:bg-red-500 transition-colors"
+                  title="Clear sketch"
+                >
+                  <XCircleIcon className="w-5 h-5" />
+                </button>
+              </div>
+            )}
+
+
             <button
               onClick={handleGenerateStoryboard}
               disabled={isLoading}
@@ -249,8 +422,9 @@ export default function App() {
             {error && <p className="text-red-400 mt-4 text-center">{error}</p>}
           </div>
 
+
           {storyboard.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {storyboard.map((scene, index) => (
                 <div key={scene.sceneNumber} className="bg-slate-800 rounded-2xl overflow-hidden shadow-lg border border-slate-700 flex flex-col animate-fade-in">
                   <div className="aspect-video bg-slate-700/50 flex items-center justify-center relative">
@@ -281,7 +455,7 @@ export default function App() {
                     </div>
                     
                     {scene.onScreenText && (
-                      <div className="mt-2 pt-2 border-t border-slate-700">
+                    <div className="mt-2 pt-2 border-t border-slate-700">
                         <h3 className="font-bold text-cyan-400 mb-1">On-Screen Text</h3>
                         <p className="text-2xl font-black text-center text-transparent bg-clip-text bg-gradient-to-r from-slate-100 to-slate-300 p-2">
                           {scene.onScreenText}
