@@ -162,51 +162,62 @@ Respond ONLY with a valid JSON array of scene objects.`;
 
 
   // --- MODIFIED --- Completely new function for multimodal image generation
-  const generateImage = async (prompt, sketchData) => {
+  // --- FIXED --- Image generation without invalid generationConfig
+// --- FIXED --- Image generation with renamed variable
+const generateImage = async (prompt, sketchData) => {
+  
+  const parts = [
+    { text: `Create a cinematic, professional product video still, high resolution, dynamic lighting, based on this description: "${prompt}"` }
+  ];
+
+  if (sketchData) {
+    parts.push({ text: "Use this sketch as a strong visual reference for composition and style:" });
+    parts.push({
+      inlineData: {
+        mimeType: sketchData.mimeType,
+        data: sketchData.data
+      }
+    });
+  }
+  
+  const payload = { 
+    contents: [{ parts: parts }]
+  };
+
+  const apiCall = async () => {
+    const response = await fetch(IMAGE_API_URL, { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
     
-    const parts = [
-      { text: `Generate one single image. Create a cinematic, professional product video still, high resolution, dynamic lighting, based on this description: "${prompt}"` }
-    ];
-
-
-    if (sketchData) {
-      parts.push({ text: "Use this sketch as a strong visual reference for composition and style:" });
-      parts.push({
-        inlineData: {
-          mimeType: sketchData.mimeType,
-          data: sketchData.data
-        }
-      });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('API Error Response:', errorText);
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
     
-    const payload = { 
-      contents: [{ parts: parts }],
-      generationConfig: {
-        // Ask the model to return exactly one image
-        candidateCount: 1, 
-        responseMimeType: "image/png"
-      }
-    };
-
-
-    const apiCall = async () => {
-      // Use the new IMAGE_API_URL
-      const response = await fetch(IMAGE_API_URL, { 
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      return response.json();
-    };
-
-
-    const result = await exponentialBackoff(apiCall);
-    // Parse the new response format
-    const base64Data = result.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!base64Data) throw new Error("Failed to generate an image.");
-    return `data:image/png;base64,${base64Data}`;
+    return response.json();
   };
+
+  const result = await exponentialBackoff(apiCall);
+  
+  // FIXED: Renamed to responseParts to avoid redeclaration
+  const responseParts = result.candidates?.[0]?.content?.parts;
+  if (!responseParts) throw new Error("Failed to generate an image - no parts in response.");
+  
+  // Find the first part with inlineData (the image)
+  const imagePart = responseParts.find(part => part.inlineData);
+  if (!imagePart?.inlineData?.data) {
+    throw new Error("Failed to generate an image - no image data in response.");
+  }
+  
+  // Return the base64 data URL
+  const mimeType = imagePart.inlineData.mimeType || 'image/png';
+  return `data:${mimeType};base64,${imagePart.inlineData.data}`;
+};
+
+
 
 
   // --- NEW --- Handler for file upload
