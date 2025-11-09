@@ -88,63 +88,77 @@ export default function App() {
 
 
   // --- MODIFIED --- Now accepts the sketch to send with the prompt
-  const generateStoryboardScript = async (concept, audience, sketchData) => {
-    const systemPrompt = `You are an expert creative director... (Your original system prompt)... Respond ONLY with a valid JSON array...`;
-    
-    // --- MODIFIED --- Build a dynamic parts array
-    const userPromptParts = [
-      { text: `Product Concept: "${concept}". Target Audience: "${audience}".` }
-    ];
+  // --- MODIFIED --- Now accepts the sketch to send with the prompt
+const generateStoryboardScript = async (concept, audience, sketchData) => {
+  const systemPrompt = `You are an expert creative director and storyboard artist. 
+Your task is to create compelling product video storyboards.
 
+Generate a storyboard with 4-6 scenes for a product video. Each scene should include:
+- sceneNumber: Sequential number for the scene
+- visualDescription: Detailed visual description for image generation (2-3 sentences, cinematic and specific)
+- voiceover: Engaging narration for the scene (1-2 sentences)
+- onScreenText: Optional bold text to display (keep it short and impactful, or omit if not needed)
 
-    if (sketchData) {
-      userPromptParts.push({ text: "Please use this user-provided sketch as strong visual inspiration for the scenes:" });
-      userPromptParts.push({
-        inlineData: {
-          mimeType: sketchData.mimeType,
-          data: sketchData.data
-        }
-      });
-    }
+Make the storyboard visually dynamic, emotionally engaging, and aligned with the target audience.
+Focus on telling a clear story that showcases the product's benefits and value proposition.
 
+Respond ONLY with a valid JSON array of scene objects.`;
+  
+  // --- MODIFIED --- Build a dynamic parts array
+  const userPromptParts = [
+    { text: `Product Concept: "${concept}". Target Audience: "${audience}".` }
+  ];
 
-    const payload = {
-      contents: [{ parts: userPromptParts }], // <-- Use the dynamic parts
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "ARRAY",
-          items: {
-            // ... (your original schema) ...
-            properties: {
-              sceneNumber: { type: "INTEGER" },
-              visualDescription: { type: "STRING" },
-              voiceover: { type: "STRING" },
-              onScreenText: { type: "STRING" },
-            },
-            required: ["sceneNumber", "visualDescription", "voiceover"],
+  if (sketchData) {
+    userPromptParts.push({ text: "Please use this user-provided sketch as strong visual inspiration for the scenes:" });
+    userPromptParts.push({
+      inlineData: {
+        mimeType: sketchData.mimeType,
+        data: sketchData.data
+      }
+    });
+  }
+
+  const payload = {
+    contents: [{ parts: userPromptParts }],
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            sceneNumber: { type: "INTEGER" },
+            visualDescription: { type: "STRING" },
+            voiceover: { type: "STRING" },
+            onScreenText: { type: "STRING" },
           },
+          required: ["sceneNumber", "visualDescription", "voiceover"],
         },
       },
-    };
-
-
-    const apiCall = async () => {
-        const response = await fetch(TEXT_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        });
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        return response.json();
-    };
-    
-    const result = await exponentialBackoff(apiCall);
-    const rawJson = result.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawJson) throw new Error("Failed to get a valid script from the AI.");
-    return JSON.parse(rawJson);
+    },
   };
+
+  const apiCall = async () => {
+    const response = await fetch(TEXT_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`HTTP error! status: ${response.status}, message: ${JSON.stringify(errorData)}`);
+    }
+    return response.json();
+  };
+  
+  const result = await exponentialBackoff(apiCall);
+  const rawJson = result.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!rawJson) throw new Error("Failed to get a valid script from the AI.");
+  return JSON.parse(rawJson);
+};
+
 
 
   // --- MODIFIED --- Completely new function for multimodal image generation
